@@ -1301,7 +1301,7 @@ lib/config/api_keys.dart
 dependencies:
   flutter:
     sdk: flutter
-  google_generative_ai: ^0.4.3  # เพิ่มบรรทัดนี้
+  http: ^1.5.0 # เพิ่มบรรทัดนี้
 ```
 
 3. บันทึกไฟล์ → VS Code จะรัน `flutter pub get` อัตโนมัติ
@@ -1331,8 +1331,9 @@ class ApiConfig {
 สร้างไฟล์ `lib/pages/ai_chat_page.dart`:
 
 ```dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 
 class AiChatPage extends StatefulWidget {
@@ -1344,25 +1345,28 @@ class AiChatPage extends StatefulWidget {
 
 class _AiChatPageState extends State<AiChatPage> {
   final TextEditingController _controller = TextEditingController();
+  // เก็บประวัติการสนทนาในรูปแบบที่ Gemini API ต้องการ
+  final List<Map<String, dynamic>> _history = [];
+  // เก็บข้อความสำหรับแสดงผลบนหน้าจอ
   final List<Map<String, String>> _messages = [];
   bool _isLoading = false;
-  late final GenerativeModel _model;
 
-  @override
-  void initState() {
-    super.initState();
-    // เริ่มต้น Gemini Model
-    _model = GenerativeModel(
-      model: 'gemini-2.0-flash',  // ใช้ Flash สำหรับ Demo (เร็วและฟรี)
-      apiKey: ApiConfig.geminiApiKey,
-    );
-  }
+  static const String _model = 'gemini-2.0-flash';
+  static const String _baseUrl =
+      'https://generativelanguage.googleapis.com/v1beta/models';
 
-  // ส่งข้อความไปยัง Gemini API
+  // ส่งข้อความไปยัง Gemini REST API โดยตรง
   Future<void> _sendMessage() async {
     final userMessage = _controller.text.trim();
-    if (userMessage.isEmpty) return;
+    if (userMessage.isEmpty || _isLoading) return;
 
+    // เพิ่มข้อความผู้ใช้เข้า History และ UI
+    _history.add({
+      'role': 'user',
+      'parts': [
+        {'text': userMessage}
+      ],
+    });
     setState(() {
       _messages.add({'role': 'user', 'text': userMessage});
       _isLoading = true;
@@ -1370,22 +1374,59 @@ class _AiChatPageState extends State<AiChatPage> {
     _controller.clear();
 
     try {
-      final content = [Content.text(userMessage)];
-      final response = await _model.generateContent(content);
-      
-      setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'text': response.text ?? 'ไม่ได้รับการตอบกลับ'
+      // เรียก Gemini REST API
+      final response = await http.post(
+        Uri.parse(
+          '$_baseUrl/$_model:generateContent?key=${ApiConfig.geminiApiKey}',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': _history, // ส่งประวัติทั้งหมดเพื่อให้ AI จำบทสนทนา
+          'generationConfig': {
+            'temperature': 0.7,
+            'maxOutputTokens': 1024,
+          },
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final replyText = data['candidates'][0]['content']['parts'][0]['text']
+            as String? ??
+            'ไม่ได้รับการตอบกลับ';
+
+        // เพิ่มคำตอบของ AI เข้า History เพื่อบทสนทนาต่อเนื่อง
+        _history.add({
+          'role': 'model',
+          'parts': [
+            {'text': replyText}
+          ],
         });
-      });
+        setState(() {
+          _messages.add({'role': 'assistant', 'text': replyText});
+        });
+      } else {
+        // แสดง Error พร้อม Status Code เพื่อช่วย Debug
+        final error = jsonDecode(response.body);
+        final errorMessage =
+            error['error']['message'] as String? ?? 'Unknown error';
+        setState(() {
+          _messages.add({
+            'role': 'assistant',
+            'text': 'เกิดข้อผิดพลาด (${response.statusCode}): $errorMessage',
+          });
+        });
+        // ลบข้อความผู้ใช้ออกจาก History เพราะไม่มีคำตอบ
+        _history.removeLast();
+      }
     } catch (e) {
       setState(() {
         _messages.add({
           'role': 'assistant',
-          'text': 'เกิดข้อผิดพลาด: ${e.toString()}'
+          'text': 'เกิดข้อผิดพลาด: ${e.toString()}',
         });
       });
+      _history.removeLast();
     } finally {
       setState(() => _isLoading = false);
     }
@@ -1417,7 +1458,7 @@ class _AiChatPageState extends State<AiChatPage> {
                     itemBuilder: (context, index) {
                       final message = _messages[index];
                       final isUser = message['role'] == 'user';
-                      
+
                       return Align(
                         alignment: isUser
                             ? Alignment.centerRight
@@ -1426,7 +1467,8 @@ class _AiChatPageState extends State<AiChatPage> {
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(12),
                           constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.75,
+                            maxWidth:
+                                MediaQuery.of(context).size.width * 0.75,
                           ),
                           decoration: BoxDecoration(
                             color: isUser ? Colors.blue : Colors.grey[200],
@@ -1435,7 +1477,8 @@ class _AiChatPageState extends State<AiChatPage> {
                           child: Text(
                             message['text']!,
                             style: TextStyle(
-                              color: isUser ? Colors.white : Colors.black,
+                              color:
+                                  isUser ? Colors.white : Colors.black,
                             ),
                           ),
                         ),
@@ -1443,14 +1486,14 @@ class _AiChatPageState extends State<AiChatPage> {
                     },
                   ),
           ),
-          
+
           // Loading Indicator
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.all(8.0),
               child: CircularProgressIndicator(),
             ),
-          
+
           // Input Box
           Container(
             padding: const EdgeInsets.all(8),
@@ -1496,7 +1539,7 @@ class _AiChatPageState extends State<AiChatPage> {
       ),
     );
   }
-  
+
   @override
   void dispose() {
     _controller.dispose();
