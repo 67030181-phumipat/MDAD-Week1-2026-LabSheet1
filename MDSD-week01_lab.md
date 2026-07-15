@@ -1720,13 +1720,10 @@ flutter run
 
 ### 3.1 ผลการติดตั้ง Flutter
 
+<img width="1034" height="301" alt="flutter doctor" src="https://github.com/user-attachments/assets/14aaedc9-0193-4404-b2dd-c85c338e6a79" />
+
 ```
 flutter doctor output:
-┌─────────────────────────────────────────────────────────┐
-│                                                         │
-│  วางผลลัพธ์จาก flutter doctor ที่นี่                    │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
 
 Flutter Version: 3.44.4
 Dart Version: ______________________
